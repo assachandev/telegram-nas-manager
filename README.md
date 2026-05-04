@@ -15,14 +15,31 @@ A private NAS file management bot for Telegram — upload, browse, search, and o
 ## Features
 
 - **Upload** — Send any file; the bot detects its category and suggests the right folder. Navigate the full directory tree to pick a custom destination.
-- **Browse** — Browse NAS contents by category with pagination, file sizes, and timestamps.
-- **Search** — Recursive filename search across the entire NAS with pagination.
-- **Rename** — Rename any file inline from the file options menu.
-- **Folder Manager** — Create, rename, or delete directories via an interactive inline menu.
-- **Trash** — Deleted items move to `.trash/`. View, restore, or permanently delete from within the bot.
-- **Storage Monitor** — Disk usage with a visual progress bar and health indicator.
-- **Single-user auth** — One authorized Telegram ID. All others are blocked at every entry point.
-- **Path traversal protection** — All paths are validated to stay within the NAS root.
+- **Browse** — 🔍 Browse NAS by category with pagination and file details.
+- **Search** — 🔎 Recursive filename search across the entire NAS with pagination.
+- **Rename** — Rename files inline from the file options menu.
+- **Folder Manager** — 📂 Create, rename, or delete directories via interactive menu.
+- **Trash** — 🗑 Move deleted items to `.trash/`. View, restore, or permanently delete.
+- **Storage Monitor** — 📊 Disk usage with status indicator (🟢 🟡 🔴).
+- **Single-user auth** — One authorized Telegram ID. All others blocked.
+- **Security** — Path traversal protection, filename validation, input sanitization.
+
+---
+
+## UI Design
+
+Clean, minimal interface — emoji + bold headers, no verbose text.
+
+```
+📂 NAS Manager
+├── 🔍 Browse     — Category selection
+├── 🔎 Find       — Filename search  
+├── 📂 Folders    — Create/rename/delete
+├── 🗑 Trash      — Restore/delete items
+└── 📊 Storage    — Disk usage & status
+```
+
+All messages are concise with icons for quick scanning. Error messages use ❌, confirmations use ✅.
 
 ---
 
@@ -91,16 +108,16 @@ Logs: `docker compose logs -f`
 
 ## Usage
 
-The bot uses a persistent Reply Keyboard — no commands needed.
+All operations via a persistent Reply Keyboard — no slash commands needed.
 
-| Button | Description |
+| Button | Action |
 |---|---|
-| Browse | Browse NAS by category with pagination |
-| Find | Search files by name across the entire NAS |
-| Folders | Create, rename, or delete directories |
-| Trash | View, restore, or permanently delete trashed items |
-| Storage | Disk usage and health status |
-| _(send any file)_ | Upload flow — select destination folder |
+| 🔍 Browse | Browse by category, view files with sizes |
+| 🔎 Find | Search by filename (recursive) |
+| 📂 Folders | Create, rename, or delete directories |
+| 🗑 Trash | View deleted items, restore or delete |
+| 📊 Storage | Show disk usage with status |
+| _(upload file)_ | Auto-categorize and select destination |
 
 ---
 
