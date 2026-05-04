@@ -6,13 +6,16 @@ import re
 import time
 from pathlib import Path
 from typing import Optional, Dict, Union
+from collections import OrderedDict
 
 logger = logging.getLogger(__name__)
 
 _INVALID_NAME_CHARS = set('/\\\x00')
 _MAX_FOLDER_NAME_LEN = 255
+_MAX_RATE_DATA_ENTRIES = 10000  # Prevent unbounded growth
 
 def get_disk_usage(path: Union[str, Path]) -> Optional[Dict[str, Union[int, float]]]:
+    """Get disk usage statistics for a path (total, used, free, percent)."""
     try:
         total, used, free = shutil.disk_usage(path)
         percent = (used / total) * 100
@@ -22,11 +25,13 @@ def get_disk_usage(path: Union[str, Path]) -> Optional[Dict[str, Union[int, floa
         return None
 
 def generate_progress_bar(percent: float, length: int = 15) -> str:
+    """Generate a visual progress bar for disk usage."""
     filled_length = int(round(length * percent / 100))
     bar = "▰" * filled_length + "▱" * (length - filled_length)
     return bar
 
 def format_bytes(size_bytes: int) -> str:
+    """Format bytes to human-readable size (B, KB, MB, GB, etc)."""
     if size_bytes == 0:
         return "0 B"
     size_name = ("B", "KB", "MB", "GB", "TB", "PB")
@@ -36,6 +41,7 @@ def format_bytes(size_bytes: int) -> str:
     return f"{s} {size_name[i]}"
 
 def sanitize_filename(filename: str) -> str:
+    """Remove dangerous characters from filename for safe storage."""
     filename = os.path.basename(filename)
     filename = re.sub(r'[^\w\.\-]', '_', filename)
     if not filename:
@@ -43,6 +49,7 @@ def sanitize_filename(filename: str) -> str:
     return filename
 
 def get_unique_path(target_path: Path) -> Path:
+    """Get a unique path by appending (1), (2), etc if target exists."""
     if not target_path.exists():
         return target_path
     stem = target_path.stem
@@ -55,16 +62,24 @@ def get_unique_path(target_path: Path) -> Path:
             return new_path
         counter += 1
 
-_rate_data: Dict[int, float] = {}
+_rate_data: OrderedDict[int, float] = OrderedDict()
 
 def is_rate_limited(user_id: int, min_interval: float = 2.0) -> bool:
+    """Check and update rate limiter for destructive operations. Prevents spam."""
     now = time.time()
     if now - _rate_data.get(user_id, 0) < min_interval:
         return True
+
     _rate_data[user_id] = now
+
+    # Clean up old entries if dict grows too large (LRU-style)
+    if len(_rate_data) > _MAX_RATE_DATA_ENTRIES:
+        _rate_data.popitem(last=False)  # Remove oldest (FIFO)
+
     return False
 
 def safe_resolve(base: Path, rel_path: str) -> Optional[Path]:
+    """Safely resolve relative path within base directory, preventing traversal attacks."""
     try:
         resolved = (base / rel_path).resolve()
         resolved.relative_to(base.resolve())
@@ -73,6 +88,7 @@ def safe_resolve(base: Path, rel_path: str) -> Optional[Path]:
         return None
 
 def validate_folder_name(name: str) -> Optional[str]:
+    """Validate folder name for safety and restrictions. Returns error message if invalid."""
     if not name:
         return "Name cannot be empty."
     if len(name) > _MAX_FOLDER_NAME_LEN:
@@ -83,7 +99,8 @@ def validate_folder_name(name: str) -> Optional[str]:
         return "Name contains control characters."
     return None
 
-def ensure_nas_structure(nas_path: str, categories: Dict):
+def ensure_nas_structure(nas_path: str, categories: Dict) -> None:
+    """Create NAS root and category folders if they don't exist."""
     nas_root = Path(nas_path)
     if not nas_root.exists():
         logger.warning(f"NAS path '{nas_root}' does not exist. Creating...")

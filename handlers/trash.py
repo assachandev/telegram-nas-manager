@@ -20,22 +20,25 @@ def _get_nas_root() -> Path:
 
 @router.message(lambda m: m.text == "🗑 Trash")
 async def cmd_trash(message: types.Message):
+    """Open trash browser."""
     if not is_authorized(message.from_user.id):
         return
     await _show_trash(message, message.from_user.id, 0)
 
 @router.callback_query(F.data.startswith("trash_page:"))
 async def trash_page(callback: types.CallbackQuery):
+    """Handle trash pagination (regenerates cache on each page)."""
     page = int(callback.data.split(":", 1)[1])
     await _show_trash(callback, callback.from_user.id, page)
 
 async def _show_trash(target, user_id: int, page: int):
+    """Display trash contents with pagination. Cache is regenerated to prevent stale indices."""
     nas_root = _get_nas_root()
 
     items = await asyncio.to_thread(list_trash_items, nas_root)
     total = len(items)
 
-    # Cache item names for this user
+    # ALWAYS regenerate cache for this page to prevent stale index problems
     _trash_cache[user_id] = [item.name for item in items]
 
     if total == 0:
@@ -93,12 +96,13 @@ async def _show_trash(target, user_id: int, page: int):
 
 @router.callback_query(F.data.startswith("trash_opts:"))
 async def trash_item_options(callback: types.CallbackQuery):
+    """Show options for trash item (restore/delete/view)."""
     idx = int(callback.data.split(":", 1)[1])
     user_id = callback.from_user.id
 
     cache = _trash_cache.get(user_id, [])
     if idx >= len(cache):
-        await callback.answer("❌ Item not found. Refresh trash.", show_alert=True)
+        await callback.answer("❌ Item not found. Please refresh trash.", show_alert=True)
         return
 
     item_name = cache[idx]
@@ -106,7 +110,7 @@ async def trash_item_options(callback: types.CallbackQuery):
     item_path = nas_root / ".trash" / item_name
 
     if not item_path.exists():
-        await callback.answer("❌ Item no longer exists.", show_alert=True)
+        await callback.answer("❌ Item no longer exists (may have been permanently deleted).", show_alert=True)
         return
 
     try:
@@ -136,6 +140,7 @@ async def trash_item_options(callback: types.CallbackQuery):
 
 @router.callback_query(F.data.startswith("trash_restore:"))
 async def trash_restore(callback: types.CallbackQuery):
+    """Restore item from trash to /Restored/ (destructive operation with rate limit)."""
     idx = int(callback.data.split(":", 1)[1])
     user_id = callback.from_user.id
 
@@ -145,7 +150,7 @@ async def trash_restore(callback: types.CallbackQuery):
 
     cache = _trash_cache.get(user_id, [])
     if idx >= len(cache):
-        await callback.answer("❌ Item not found. Refresh trash.", show_alert=True)
+        await callback.answer("❌ Item not found. Please refresh trash.", show_alert=True)
         return
 
     item_name = cache[idx]
@@ -180,6 +185,7 @@ async def trash_restore(callback: types.CallbackQuery):
 
 @router.callback_query(F.data.startswith("trash_del:"))
 async def trash_delete_permanent(callback: types.CallbackQuery):
+    """Permanently delete trash item (destructive operation with rate limit)."""
     idx = int(callback.data.split(":", 1)[1])
     user_id = callback.from_user.id
 
@@ -189,7 +195,7 @@ async def trash_delete_permanent(callback: types.CallbackQuery):
 
     cache = _trash_cache.get(user_id, [])
     if idx >= len(cache):
-        await callback.answer("❌ Item not found. Refresh trash.", show_alert=True)
+        await callback.answer("❌ Item not found. Please refresh trash.", show_alert=True)
         return
 
     item_name = cache[idx]
@@ -221,6 +227,7 @@ async def trash_delete_permanent(callback: types.CallbackQuery):
 
 @router.callback_query(F.data == "trash_empty_conf")
 async def trash_empty_confirm(callback: types.CallbackQuery):
+    """Show empty trash confirmation."""
     builder = InlineKeyboardBuilder()
     builder.button(text="🔥 Yes, Empty All", callback_data="trash_empty_exec")
     builder.button(text="❌ Cancel", callback_data="trash_page:0")
@@ -234,6 +241,7 @@ async def trash_empty_confirm(callback: types.CallbackQuery):
 
 @router.callback_query(F.data == "trash_empty_exec")
 async def trash_empty_execute(callback: types.CallbackQuery):
+    """Permanently delete all trash (destructive operation with rate limit)."""
     if is_rate_limited(callback.from_user.id):
         await callback.answer("⏳ Too fast, wait a moment.", show_alert=True)
         return
@@ -251,5 +259,6 @@ async def trash_empty_execute(callback: types.CallbackQuery):
 
 @router.callback_query(F.data == "trash_close")
 async def trash_close(callback: types.CallbackQuery):
+    """Close trash browser."""
     await callback.message.edit_text("Closed.", parse_mode="HTML")
     await callback.answer()

@@ -1,6 +1,5 @@
 import asyncio
 import logging
-import time
 from datetime import datetime
 from pathlib import Path
 from aiogram import Router, types, F, Bot
@@ -24,6 +23,7 @@ FIND_PAGE_SIZE = 10
 _MAX_FIND_CACHE = 200
 
 def get_category_keyboard():
+    """Build category selector keyboard for browsing files."""
     builder = InlineKeyboardBuilder()
     for category in CATEGORIES:
         builder.button(text=f"📁 {category}", callback_data=f"list:{category}:0")
@@ -33,17 +33,20 @@ def get_category_keyboard():
 
 @router.callback_query(F.data == "search_cancel")
 async def search_cancel(callback: types.CallbackQuery):
+    """Cancel current search/browse operation."""
     await callback.message.edit_text("Cancelled.", parse_mode="HTML")
     await callback.answer()
 
 @router.message(Command("search"))
 async def cmd_search(message: types.Message):
+    """Start file browser with category selection."""
     if not is_authorized(message.from_user.id):
         return
     await message.answer("<b>Browse</b>\nSelect a category:", parse_mode="HTML", reply_markup=get_category_keyboard())
 
 @router.message(lambda m: m.text == "🔎 Find")
 async def find_button(message: types.Message, state: FSMContext):
+    """Start file search prompt."""
     if not is_authorized(message.from_user.id):
         return
     await state.set_state(FindState.waiting_for_query)
@@ -51,18 +54,20 @@ async def find_button(message: types.Message, state: FSMContext):
 
 @router.message(FindState.waiting_for_query)
 async def find_query_received(message: types.Message, state: FSMContext):
+    """Process user search query."""
     await state.clear()
     query = message.text.strip() if message.text else None
     if not query:
         await message.answer("❌ Please type a filename to search for.", parse_mode="HTML")
         return
     if len(query) > 200:
-        await message.answer("❌ Search query too long.", parse_mode="HTML")
+        await message.answer("❌ Search query too long (max 200 characters).", parse_mode="HTML")
         return
     await _run_find(message, query)
 
 @router.message(Command("find"))
 async def cmd_find(message: types.Message, command: CommandObject):
+    """Search files by name: /find [filename]."""
     if not is_authorized(message.from_user.id):
         return
     query = command.args
@@ -72,6 +77,7 @@ async def cmd_find(message: types.Message, command: CommandObject):
     await _run_find(message, query)
 
 async def _run_find(message: types.Message, query: str):
+    """Execute file search across all directories."""
     query_lower = query.lower()
     nas_root = Path(NAS_ROOT_PATH)
 
@@ -93,7 +99,7 @@ async def _run_find(message: types.Message, query: str):
         await message.answer(f"No files found matching <code>{query}</code>.", parse_mode="HTML")
         return
 
-    # Evict oldest entry if cache is full
+    # Evict oldest entry if cache is full (LRU-style)
     if len(find_cache) >= _MAX_FIND_CACHE:
         oldest_key = next(iter(find_cache))
         find_cache.pop(oldest_key, None)
@@ -102,6 +108,7 @@ async def _run_find(message: types.Message, query: str):
     await _send_find_page(message, message.from_user.id, 0)
 
 async def _send_find_page(target: types.Message | types.CallbackQuery, user_id: int, page: int):
+    """Send paginated search results with file options."""
     cache = find_cache.get(user_id)
     if not cache:
         txt = "❌ Search expired, please run /find again."
@@ -118,11 +125,15 @@ async def _send_find_page(target: types.Message | types.CallbackQuery, user_id: 
     page = max(0, min(page, total_pages - 1))
 
     builder = InlineKeyboardBuilder()
+    skipped_count = 0
     for rel_dir, name, size, mtime in results[page * FIND_PAGE_SIZE:(page + 1) * FIND_PAGE_SIZE]:
         size_str = format_bytes(size)
         cb = f"file_opts:{rel_dir}:{name}"
         if len(cb.encode()) <= 64:
             builder.button(text=f"📄 {name}  [{size_str}]", callback_data=cb)
+        else:
+            skipped_count += 1
+            logger.warning(f"Skipped file (name too long for callback): {name}")
     builder.adjust(1)
 
     nav = []
@@ -138,6 +149,8 @@ async def _send_find_page(target: types.Message | types.CallbackQuery, user_id: 
         f"<b>Search</b>  <code>{query}</code>\n"
         f"{total} result(s)  ·  Page {page+1} of {total_pages}"
     )
+    if skipped_count > 0:
+        text += f"\n⚠️ {skipped_count} file(s) with very long names not accessible"
     if isinstance(target, types.Message):
         await target.answer(text, parse_mode="HTML", reply_markup=builder.as_markup())
     else:
@@ -145,7 +158,8 @@ async def _send_find_page(target: types.Message | types.CallbackQuery, user_id: 
 
 @router.callback_query(F.data.startswith("find_page:"))
 async def find_page_callback(callback: types.CallbackQuery):
-    _, user_id_str, page_str = callback.data.split(":")
+    """Handle pagination for search results."""
+    _, user_id_str, page_str = callback.data.split(":", 2)
     # Only allow the original requester to paginate their results
     if str(callback.from_user.id) != user_id_str:
         await callback.answer("❌ Not your search.", show_alert=True)
@@ -155,6 +169,7 @@ async def find_page_callback(callback: types.CallbackQuery):
 
 @router.callback_query(F.data.startswith("list:"))
 async def list_files_in_category(callback: types.CallbackQuery):
+    """Browse files in a category or folder."""
     _, rel_path, page_str = callback.data.split(":", 2)
     page = int(page_str)
 
@@ -218,11 +233,13 @@ async def list_files_in_category(callback: types.CallbackQuery):
 
 @router.callback_query(F.data == "back_to_categories")
 async def back_to_categories(callback: types.CallbackQuery):
+    """Return to category selection."""
     await callback.message.edit_text("<b>Browse</b>\nSelect a category:", parse_mode="HTML", reply_markup=get_category_keyboard())
     await callback.answer()
 
 @router.callback_query(F.data.startswith("file_opts:"))
 async def show_file_options(callback: types.CallbackQuery):
+    """Show download/rename/delete options for a file."""
     _, rel_dir, file_name = callback.data.split(":", 2)
 
     nas_root = Path(NAS_ROOT_PATH)
@@ -260,6 +277,7 @@ async def show_file_options(callback: types.CallbackQuery):
 
 @router.callback_query(F.data.startswith("download:"))
 async def send_file_to_user(callback: types.CallbackQuery, bot: Bot):
+    """Download a file from the NAS."""
     _, rel_dir, file_name = callback.data.split(":", 2)
 
     nas_root = Path(NAS_ROOT_PATH)
@@ -284,6 +302,7 @@ async def send_file_to_user(callback: types.CallbackQuery, bot: Bot):
 
 @router.callback_query(F.data.startswith("del_conf:"))
 async def delete_confirmation(callback: types.CallbackQuery):
+    """Show delete confirmation for a file."""
     _, rel_dir, file_name = callback.data.split(":", 2)
     builder = InlineKeyboardBuilder()
     builder.button(text="🔥 Yes, Move to Trash", callback_data=f"del_exec:{rel_dir}:{file_name}")
@@ -300,6 +319,7 @@ async def delete_confirmation(callback: types.CallbackQuery):
 
 @router.callback_query(F.data.startswith("del_exec:"))
 async def delete_file_execution(callback: types.CallbackQuery):
+    """Move file to trash (destructive operation with rate limit)."""
     _, rel_dir, file_name = callback.data.split(":", 2)
 
     if is_rate_limited(callback.from_user.id):
@@ -315,22 +335,23 @@ async def delete_file_execution(callback: types.CallbackQuery):
 
     try:
         if file_path.exists():
+            import time
             trash_dir = nas_root / ".trash"
             await asyncio.to_thread(lambda: trash_dir.mkdir(exist_ok=True))
-            import time
             trash_dest = trash_dir / f"{int(time.time())}_{file_name}"
             await asyncio.to_thread(lambda: file_path.rename(trash_dest))
             await callback.message.edit_text(f"<b>Moved to Trash</b>\n<code>{file_name}</code>", parse_mode="HTML")
             logger.info(f"User {callback.from_user.id} moved to trash: {file_path}")
         else:
-            await callback.answer("❌ File already gone.", show_alert=True)
+            await callback.answer("❌ File not found (may have been deleted).", show_alert=True)
     except OSError as e:
-        logger.error(f"Error deleting file: {e}")
-        await callback.answer("❌ Error moving file to trash.", show_alert=True)
+        logger.error(f"Error moving file to trash: {e}", exc_info=True)
+        await callback.answer(f"❌ Error: {type(e).__name__}", show_alert=True)
     await callback.answer()
 
 @router.callback_query(F.data == "check_space_quick")
 async def check_space_quick(callback: types.CallbackQuery):
+    """Show quick disk usage update."""
     usage = get_disk_usage(NAS_ROOT_PATH)
     if usage:
         bar = generate_progress_bar(usage['percent'], length=PROGRESS_BAR_LENGTH)

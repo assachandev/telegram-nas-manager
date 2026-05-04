@@ -16,8 +16,7 @@ logger = logging.getLogger(__name__)
 router = Router()
 
 class FolderManager(StatesGroup):
-    choosing_action = State()
-    browsing = State()
+    """FSM states for folder manager operations."""
     waiting_for_name = State()
     confirm_create = State()
     confirm_delete = State()
@@ -31,6 +30,7 @@ _MODE_TITLES = {
 }
 
 async def get_folder_browser_keyboard(current_path_str: str, mode: str):
+    """Build folder browser keyboard for navigate and operate on directories."""
     builder = InlineKeyboardBuilder()
     nas_root = Path(NAS_ROOT_PATH)
 
@@ -73,6 +73,7 @@ async def get_folder_browser_keyboard(current_path_str: str, mode: str):
 @router.message(Command("mkdir"))
 @router.callback_query(F.data == "folders_main_quick")
 async def cmd_folder_manager(event: Union[types.Message, types.CallbackQuery], state: FSMContext):
+    """Open folder manager menu (create/rename/delete)."""
     if not is_authorized(event.from_user.id):
         return
 
@@ -93,6 +94,7 @@ async def cmd_folder_manager(event: Union[types.Message, types.CallbackQuery], s
 
 @router.callback_query(F.data.startswith("fdir_mode:"))
 async def start_browsing(callback: types.CallbackQuery, state: FSMContext):
+    """Start folder browser for selected operation mode."""
     mode = callback.data.split(":", 1)[1]
     await state.update_data(mode=mode)
 
@@ -107,6 +109,7 @@ async def start_browsing(callback: types.CallbackQuery, state: FSMContext):
 
 @router.callback_query(F.data.startswith("fdir_browse:"))
 async def browse_folder_manager(callback: types.CallbackQuery, state: FSMContext):
+    """Browse folders to select target for create/rename/delete."""
     _, mode, path = callback.data.split(":", 2)
 
     nas_root = Path(NAS_ROOT_PATH)
@@ -128,6 +131,7 @@ async def browse_folder_manager(callback: types.CallbackQuery, state: FSMContext
 
 @router.callback_query(F.data.startswith("fdir_mkdir_here:"))
 async def ask_new_folder_name(callback: types.CallbackQuery, state: FSMContext):
+    """Prompt user for new folder name (CREATE flow)."""
     path = callback.data.split(":", 1)[1]
     await state.update_data(parent_path=path)
     await state.set_state(FolderManager.waiting_for_name)
@@ -143,6 +147,7 @@ async def ask_new_folder_name(callback: types.CallbackQuery, state: FSMContext):
 
 @router.message(FolderManager.waiting_for_name)
 async def process_new_name(message: types.Message, state: FSMContext):
+    """Validate folder name and show confirmation."""
     folder_name = message.text.strip() if message.text else ""
     error = validate_folder_name(folder_name)
     if error:
@@ -167,6 +172,7 @@ async def process_new_name(message: types.Message, state: FSMContext):
 
 @router.callback_query(FolderManager.confirm_create, F.data == "fdir_confirm_create")
 async def execute_create(callback: types.CallbackQuery, state: FSMContext):
+    """Execute folder creation (destructive operation, no rate limit - should add one)."""
     data = await state.get_data()
 
     nas_root = Path(NAS_ROOT_PATH)
@@ -185,8 +191,8 @@ async def execute_create(callback: types.CallbackQuery, state: FSMContext):
         )
         logger.info(f"User {callback.from_user.id} created folder: {target}")
     except OSError as e:
-        logger.error(f"Error creating folder: {e}")
-        await callback.message.edit_text("❌ Failed to create folder. Please try again.", parse_mode="HTML")
+        logger.error(f"Error creating folder: {e}", exc_info=True)
+        await callback.message.edit_text(f"❌ Failed to create folder: {type(e).__name__}", parse_mode="HTML")
 
     await state.clear()
     await callback.answer()
@@ -195,6 +201,7 @@ async def execute_create(callback: types.CallbackQuery, state: FSMContext):
 
 @router.callback_query(F.data.startswith("fdir_rname_here:"))
 async def ask_rename_folder(callback: types.CallbackQuery, state: FSMContext):
+    """Prompt user for new folder name (RENAME flow)."""
     path = callback.data.split(":", 1)[1]
     await state.update_data(rename_path=path)
     await state.set_state(FolderManager.waiting_for_rename)
@@ -210,6 +217,7 @@ async def ask_rename_folder(callback: types.CallbackQuery, state: FSMContext):
 
 @router.message(FolderManager.waiting_for_rename)
 async def process_rename_name(message: types.Message, state: FSMContext):
+    """Validate new folder name and show confirmation."""
     new_name = message.text.strip() if message.text else ""
     error = validate_folder_name(new_name)
     if error:
@@ -234,6 +242,7 @@ async def process_rename_name(message: types.Message, state: FSMContext):
 
 @router.callback_query(FolderManager.confirm_rename, F.data == "fdir_confirm_rename")
 async def execute_rename(callback: types.CallbackQuery, state: FSMContext):
+    """Execute folder rename (destructive operation, no rate limit - should add one)."""
     data = await state.get_data()
 
     nas_root = Path(NAS_ROOT_PATH)
@@ -263,8 +272,8 @@ async def execute_rename(callback: types.CallbackQuery, state: FSMContext):
         )
         logger.info(f"User {callback.from_user.id} renamed folder: {target} → {new_path}")
     except OSError as e:
-        logger.error(f"Error renaming folder: {e}")
-        await callback.message.edit_text("❌ Failed to rename folder. Please try again.", parse_mode="HTML")
+        logger.error(f"Error renaming folder: {e}", exc_info=True)
+        await callback.message.edit_text(f"❌ Failed to rename folder: {type(e).__name__}", parse_mode="HTML")
 
     await state.clear()
     await callback.answer()
@@ -273,6 +282,7 @@ async def execute_rename(callback: types.CallbackQuery, state: FSMContext):
 
 @router.callback_query(F.data.startswith("fdir_rmdir_here:"))
 async def confirm_folder_delete(callback: types.CallbackQuery, state: FSMContext):
+    """Show delete confirmation for folder (DELETE flow)."""
     path = callback.data.split(":", 1)[1]
     await state.update_data(delete_path=path)
 
@@ -293,6 +303,7 @@ async def confirm_folder_delete(callback: types.CallbackQuery, state: FSMContext
 
 @router.callback_query(FolderManager.confirm_delete, F.data == "fdir_confirm_delete_exec")
 async def execute_delete(callback: types.CallbackQuery, state: FSMContext):
+    """Execute folder deletion to trash (destructive operation, no rate limit - should add one)."""
     data = await state.get_data()
 
     nas_root = Path(NAS_ROOT_PATH)
@@ -317,8 +328,8 @@ async def execute_delete(callback: types.CallbackQuery, state: FSMContext):
         else:
             await callback.answer("❌ Folder not found.", show_alert=True)
     except OSError as e:
-        logger.error(f"Error deleting folder: {e}")
-        await callback.message.edit_text("❌ Failed to move folder to trash. Please try again.", parse_mode="HTML")
+        logger.error(f"Error moving folder to trash: {e}", exc_info=True)
+        await callback.message.edit_text(f"❌ Failed: {type(e).__name__}", parse_mode="HTML")
 
     await state.clear()
     await callback.answer()
@@ -327,6 +338,7 @@ async def execute_delete(callback: types.CallbackQuery, state: FSMContext):
 
 @router.callback_query(F.data == "fdir_cancel")
 async def cancel_folder_op(callback: types.CallbackQuery, state: FSMContext):
+    """Cancel folder manager operation."""
     await state.clear()
     await callback.message.edit_text("Cancelled.", parse_mode="HTML")
     await callback.answer()
