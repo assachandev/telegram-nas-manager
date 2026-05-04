@@ -42,7 +42,7 @@ async def _show_trash(target, user_id: int, page: int):
     _trash_cache[user_id] = [item.name for item in items]
 
     if total == 0:
-        text = "<b>🗑 Trash</b>\n\nTrash is empty."
+        text = "<b>🗑 Trash</b>\nEmpty"
         builder = InlineKeyboardBuilder()
         builder.button(text="❌ Close", callback_data="trash_close")
         markup = builder.as_markup()
@@ -84,10 +84,10 @@ async def _show_trash(target, user_id: int, page: int):
     if nav:
         builder.row(*nav)
 
-    builder.row(types.InlineKeyboardButton(text="🗑 Empty Trash", callback_data="trash_empty_conf"))
+    builder.row(types.InlineKeyboardButton(text="🔥 Empty", callback_data="trash_empty_conf"))
     builder.row(types.InlineKeyboardButton(text="❌ Close", callback_data="trash_close"))
 
-    text = f"<b>🗑 Trash</b>\n{total} item(s)  ·  Page {page+1}/{total_pages}"
+    text = f"<b>🗑 Trash</b>\n{total} item(s)  ·  {page+1}/{total_pages}"
     if isinstance(target, types.Message):
         await target.answer(text, parse_mode="HTML", reply_markup=builder.as_markup())
     else:
@@ -125,14 +125,12 @@ async def trash_item_options(callback: types.CallbackQuery):
 
     builder = InlineKeyboardBuilder()
     builder.button(text="🔁 Restore", callback_data=f"trash_restore:{idx}")
-    builder.button(text="❌ Delete Forever", callback_data=f"trash_del:{idx}")
+    builder.button(text="🔥 Delete", callback_data=f"trash_del:{idx}")
     builder.button(text="⬅️ Back", callback_data="trash_page:0")
     builder.adjust(2)
 
     await callback.message.edit_text(
-        f"<b>{display}</b>\n\n"
-        f"Size  {size_str}\n\n"
-        f"Restore moves it to <code>/Restored/</code>.",
+        f"<b>📄 {display}</b>\n{size_str}",
         parse_mode="HTML",
         reply_markup=builder.as_markup()
     )
@@ -171,15 +169,11 @@ async def trash_restore(callback: types.CallbackQuery):
     try:
         await asyncio.to_thread(lambda: restore_dir.mkdir(exist_ok=True))
         await asyncio.to_thread(lambda: item_path.rename(dest))
-        await callback.message.edit_text(
-            f"✅ <b>Restored</b>\n\n"
-            f"<code>{display}</code>\n→ <code>/Restored/</code>",
-            parse_mode="HTML"
-        )
+        await callback.message.edit_text("✅ Restored", parse_mode="HTML")
         logger.info(f"User {user_id} restored trash item: {item_name} → {dest}")
     except OSError as e:
         logger.error(f"Error restoring trash item: {e}")
-        await callback.answer("❌ Failed to restore item.", show_alert=True)
+        await callback.answer("❌ Restore failed", show_alert=True)
 
     await callback.answer()
 
@@ -212,16 +206,13 @@ async def trash_delete_permanent(callback: types.CallbackQuery):
                 await asyncio.to_thread(lambda: shutil.rmtree(item_path))
             else:
                 await asyncio.to_thread(lambda: item_path.unlink())
-            await callback.message.edit_text(
-                f"🗑 <b>Deleted</b>\n<code>{display}</code>",
-                parse_mode="HTML"
-            )
+            await callback.message.edit_text("✅ Deleted", parse_mode="HTML")
             logger.info(f"User {user_id} permanently deleted: {item_name}")
         else:
-            await callback.answer("❌ Item already gone.", show_alert=True)
+            await callback.answer("❌ Not found", show_alert=True)
     except OSError as e:
         logger.error(f"Error permanently deleting trash item: {e}")
-        await callback.answer("❌ Failed to delete item.", show_alert=True)
+        await callback.answer("❌ Delete failed", show_alert=True)
 
     await callback.answer()
 
@@ -229,11 +220,11 @@ async def trash_delete_permanent(callback: types.CallbackQuery):
 async def trash_empty_confirm(callback: types.CallbackQuery):
     """Show empty trash confirmation."""
     builder = InlineKeyboardBuilder()
-    builder.button(text="🔥 Yes, Empty All", callback_data="trash_empty_exec")
+    builder.button(text="🔥 Empty", callback_data="trash_empty_exec")
     builder.button(text="❌ Cancel", callback_data="trash_page:0")
     builder.adjust(2)
     await callback.message.edit_text(
-        "⚠️ <b>Empty Trash?</b>\n\nAll items will be <b>permanently deleted</b>. This cannot be undone.",
+        "⚠️ <b>Empty Trash?</b>",
         parse_mode="HTML",
         reply_markup=builder.as_markup()
     )
@@ -243,7 +234,7 @@ async def trash_empty_confirm(callback: types.CallbackQuery):
 async def trash_empty_execute(callback: types.CallbackQuery):
     """Permanently delete all trash (destructive operation with rate limit)."""
     if is_rate_limited(callback.from_user.id):
-        await callback.answer("⏳ Too fast, wait a moment.", show_alert=True)
+        await callback.answer("⏳ Too fast", show_alert=True)
         return
 
     nas_root = _get_nas_root()
@@ -251,7 +242,7 @@ async def trash_empty_execute(callback: types.CallbackQuery):
     _trash_cache.pop(callback.from_user.id, None)
 
     await callback.message.edit_text(
-        f"🗑 <b>Trash Emptied</b>\n{count} item(s) permanently deleted.",
+        f"✅ <b>Emptied</b>\n{count} item(s) deleted",
         parse_mode="HTML"
     )
     logger.info(f"User {callback.from_user.id} emptied trash ({count} items)")
@@ -260,5 +251,5 @@ async def trash_empty_execute(callback: types.CallbackQuery):
 @router.callback_query(F.data == "trash_close")
 async def trash_close(callback: types.CallbackQuery):
     """Close trash browser."""
-    await callback.message.edit_text("Closed.", parse_mode="HTML")
+    await callback.message.delete()
     await callback.answer()

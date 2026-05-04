@@ -19,16 +19,10 @@ MAIN_MENU = ReplyKeyboardMarkup(
 @router.message(Command("start"))
 async def cmd_start(message: types.Message):
     if not is_authorized(message.from_user.id):
-        await message.answer("⛔ <b>Access Denied</b>\nThis bot is private.", parse_mode="HTML")
+        await message.answer("⛔ <b>Access Denied</b>", parse_mode="HTML")
         return
     await message.answer(
-        f"<b>NAS File Manager</b>\n"
-        f"Hello, {message.from_user.first_name}.\n\n"
-        "<b>Browse</b>  —  Navigate files by category\n"
-        "<b>Find</b>  —  Search by filename across all folders\n"
-        "<b>Folders</b>  —  Create or remove directories\n"
-        "<b>Trash</b>  —  View and manage deleted items\n"
-        "<b>Storage</b>  —  View disk usage",
+        f"📂 <b>NAS Manager</b>",
         parse_mode="HTML",
         reply_markup=MAIN_MENU,
     )
@@ -40,17 +34,15 @@ async def cmd_space(message: types.Message):
         return
     usage = get_disk_usage(NAS_ROOT_PATH)
     if usage:
-        bar = generate_progress_bar(usage['percent'], length=PROGRESS_BAR_LENGTH)
         used_pct = usage['percent']
-        status_icon = "🟢" if used_pct < 70 else "🟡" if used_pct < 90 else "🔴"
+        status = "🟢" if used_pct < 70 else "🟡" if used_pct < 90 else "🔴"
         text = (
-            f"<b>Storage</b>  {status_icon}\n"
-            f"<code>{bar}  {used_pct:.1f}%</code>\n\n"
-            f"{format_bytes(usage['used'])} used  ·  {format_bytes(usage['free'])} free"
+            f"<b>📊 Storage</b> {status}\n"
+            f"{used_pct:.0f}%  {format_bytes(usage['used'])} / {format_bytes(usage['total'])}"
         )
         await message.answer(text, parse_mode="HTML")
     else:
-        await message.answer("❌ Could not retrieve disk usage.", parse_mode="HTML")
+        await message.answer("❌ Storage error", parse_mode="HTML")
 
 @router.message(lambda m: m.text == "🔍 Browse")
 async def cmd_browse_shortcut(message: types.Message):

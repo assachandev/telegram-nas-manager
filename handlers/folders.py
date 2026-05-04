@@ -79,13 +79,13 @@ async def cmd_folder_manager(event: Union[types.Message, types.CallbackQuery], s
 
     await state.clear()
     builder = InlineKeyboardBuilder()
-    builder.button(text="➕ Create New Folder", callback_data="fdir_mode:create")
-    builder.button(text="✏️ Rename Folder",     callback_data="fdir_mode:rename")
-    builder.button(text="🗑️ Delete Folder",     callback_data="fdir_mode:delete")
-    builder.button(text="❌ Cancel",             callback_data="fdir_cancel")
+    builder.button(text="➕ Create", callback_data="fdir_mode:create")
+    builder.button(text="✏️ Rename",     callback_data="fdir_mode:rename")
+    builder.button(text="🗑️ Delete",     callback_data="fdir_mode:delete")
+    builder.button(text="❌ Close",             callback_data="fdir_cancel")
     builder.adjust(1)
 
-    text = "<b>Folder Manager</b>\n\nSelect an operation:"
+    text = "<b>📂 Folders</b>"
     if isinstance(event, types.Message):
         await event.answer(text, parse_mode="HTML", reply_markup=builder.as_markup())
     else:
@@ -98,10 +98,10 @@ async def start_browsing(callback: types.CallbackQuery, state: FSMContext):
     mode = callback.data.split(":", 1)[1]
     await state.update_data(mode=mode)
 
-    title = _MODE_TITLES.get(mode, "<b>Folder Manager</b>")
+    title = _MODE_TITLES.get(mode, "<b>📂 Folders</b>")
     keyboard = await get_folder_browser_keyboard("", mode)
     await callback.message.edit_text(
-        f"{title}\n\nLocation:  <code>/</code>\nNavigate to the destination:",
+        f"{title}\n<code>/</code>",
         parse_mode="HTML",
         reply_markup=keyboard
     )
@@ -114,14 +114,14 @@ async def browse_folder_manager(callback: types.CallbackQuery, state: FSMContext
 
     nas_root = Path(NAS_ROOT_PATH)
     if path and safe_resolve(nas_root, path) is None:
-        await callback.answer("❌ Invalid path.", show_alert=True)
+        await callback.answer("❌ Invalid path", show_alert=True)
         return
 
     display_path = path if path else "/"
-    title = _MODE_TITLES.get(mode, "<b>Folder Manager</b>")
+    title = _MODE_TITLES.get(mode, "<b>📂 Folders</b>")
     keyboard = await get_folder_browser_keyboard(path, mode)
     await callback.message.edit_text(
-        f"{title}\n\nLocation:  <code>/{display_path}</code>\nNavigate to the destination:",
+        f"{title}\n<code>/{display_path}</code>",
         parse_mode="HTML",
         reply_markup=keyboard
     )
@@ -136,11 +136,8 @@ async def ask_new_folder_name(callback: types.CallbackQuery, state: FSMContext):
     await state.update_data(parent_path=path)
     await state.set_state(FolderManager.waiting_for_name)
 
-    display_path = path if path else "/"
     await callback.message.edit_text(
-        f"<b>Create Folder</b>\n\n"
-        f"Location:  <code>/{display_path}</code>\n\n"
-        f"Type the name of the new folder:",
+        "<b>➕ Create Folder</b>",
         parse_mode="HTML"
     )
     await callback.answer()
@@ -155,17 +152,16 @@ async def process_new_name(message: types.Message, state: FSMContext):
         return
 
     data = await state.get_data()
-    parent = data['parent_path']
     await state.update_data(folder_name=folder_name)
 
-    full_path = f"/{parent}/{folder_name}".replace("//", "/")
     builder = InlineKeyboardBuilder()
-    builder.button(text="✅ Confirm", callback_data="fdir_confirm_create")
+    builder.button(text="✅ Create", callback_data="fdir_confirm_create")
     builder.button(text="❌ Cancel",  callback_data="fdir_cancel")
+    builder.adjust(2)
 
     await state.set_state(FolderManager.confirm_create)
     await message.answer(
-        f"<b>Create Folder?</b>\n\n<code>{full_path}</code>",
+        f"<b>Create?</b>\n<code>{folder_name}</code>",
         parse_mode="HTML",
         reply_markup=builder.as_markup()
     )
@@ -185,14 +181,11 @@ async def execute_create(callback: types.CallbackQuery, state: FSMContext):
 
     try:
         await asyncio.to_thread(lambda: target.mkdir(parents=True, exist_ok=True))
-        await callback.message.edit_text(
-            f"✅ <b>Folder Created</b>\n<code>{data['folder_name']}</code>",
-            parse_mode="HTML"
-        )
+        await callback.message.edit_text("✅ Created", parse_mode="HTML")
         logger.info(f"User {callback.from_user.id} created folder: {target}")
     except OSError as e:
         logger.error(f"Error creating folder: {e}", exc_info=True)
-        await callback.message.edit_text(f"❌ Failed to create folder: {type(e).__name__}", parse_mode="HTML")
+        await callback.message.edit_text(f"❌ {type(e).__name__}", parse_mode="HTML")
 
     await state.clear()
     await callback.answer()
@@ -206,11 +199,8 @@ async def ask_rename_folder(callback: types.CallbackQuery, state: FSMContext):
     await state.update_data(rename_path=path)
     await state.set_state(FolderManager.waiting_for_rename)
 
-    folder_name = path.split("/")[-1]
     await callback.message.edit_text(
-        f"<b>Rename Folder</b>\n\n"
-        f"Current:  <code>{folder_name}</code>\n\n"
-        f"Type the new name:",
+        "<b>✏️ Rename Folder</b>",
         parse_mode="HTML"
     )
     await callback.answer()
@@ -229,13 +219,13 @@ async def process_rename_name(message: types.Message, state: FSMContext):
 
     old_name = data['rename_path'].split("/")[-1]
     builder = InlineKeyboardBuilder()
-    builder.button(text="✅ Confirm", callback_data="fdir_confirm_rename")
+    builder.button(text="✅ Rename", callback_data="fdir_confirm_rename")
     builder.button(text="❌ Cancel",  callback_data="fdir_cancel")
+    builder.adjust(2)
 
     await state.set_state(FolderManager.confirm_rename)
     await message.answer(
-        f"<b>Rename Folder?</b>\n\n"
-        f"<code>{old_name}</code>\n→ <code>{new_name}</code>",
+        f"<b>Rename?</b>\n<code>{old_name}</code> → <code>{new_name}</code>",
         parse_mode="HTML",
         reply_markup=builder.as_markup()
     )
@@ -248,7 +238,7 @@ async def execute_rename(callback: types.CallbackQuery, state: FSMContext):
     nas_root = Path(NAS_ROOT_PATH)
     target = safe_resolve(nas_root, data['rename_path'])
     if target is None or not target.exists() or not target.is_dir():
-        await callback.message.edit_text("❌ Folder not found.", parse_mode="HTML")
+        await callback.message.edit_text("❌ Folder not found", parse_mode="HTML")
         await state.clear()
         await callback.answer()
         return
@@ -256,7 +246,7 @@ async def execute_rename(callback: types.CallbackQuery, state: FSMContext):
     new_path = target.parent / data['rename_new_name']
     if new_path.exists():
         await callback.message.edit_text(
-            f"❌ A folder named <code>{data['rename_new_name']}</code> already exists here.",
+            f"❌ Already exists: <code>{data['rename_new_name']}</code>",
             parse_mode="HTML"
         )
         await state.clear()
@@ -265,15 +255,11 @@ async def execute_rename(callback: types.CallbackQuery, state: FSMContext):
 
     try:
         await asyncio.to_thread(lambda: target.rename(new_path))
-        await callback.message.edit_text(
-            f"✅ <b>Folder Renamed</b>\n\n"
-            f"<code>{target.name}</code>\n→ <code>{data['rename_new_name']}</code>",
-            parse_mode="HTML"
-        )
+        await callback.message.edit_text("✅ Renamed", parse_mode="HTML")
         logger.info(f"User {callback.from_user.id} renamed folder: {target} → {new_path}")
     except OSError as e:
         logger.error(f"Error renaming folder: {e}", exc_info=True)
-        await callback.message.edit_text(f"❌ Failed to rename folder: {type(e).__name__}", parse_mode="HTML")
+        await callback.message.edit_text(f"❌ {type(e).__name__}", parse_mode="HTML")
 
     await state.clear()
     await callback.answer()
@@ -287,15 +273,13 @@ async def confirm_folder_delete(callback: types.CallbackQuery, state: FSMContext
     await state.update_data(delete_path=path)
 
     builder = InlineKeyboardBuilder()
-    builder.button(text="🗑️ Move to Trash", callback_data="fdir_confirm_delete_exec")
+    builder.button(text="🗑️ Delete", callback_data="fdir_confirm_delete_exec")
     builder.button(text="❌ Cancel",         callback_data="fdir_cancel")
-    builder.adjust(1)
+    builder.adjust(2)
 
     await state.set_state(FolderManager.confirm_delete)
     await callback.message.edit_text(
-        f"⚠️ <b>Move Folder to Trash?</b>\n\n"
-        f"<code>/{path}</code>\n\n"
-        f"All contents will be moved to <code>.trash/</code> — recoverable manually.",
+        f"⚠️ <b>Delete?</b>\n<code>/{path}</code>",
         parse_mode="HTML",
         reply_markup=builder.as_markup()
     )
@@ -309,7 +293,7 @@ async def execute_delete(callback: types.CallbackQuery, state: FSMContext):
     nas_root = Path(NAS_ROOT_PATH)
     target = safe_resolve(nas_root, data['delete_path'])
     if target is None:
-        await callback.message.edit_text("❌ Invalid path.", parse_mode="HTML")
+        await callback.message.edit_text("❌ Invalid path", parse_mode="HTML")
         await state.clear()
         await callback.answer()
         return
@@ -320,16 +304,13 @@ async def execute_delete(callback: types.CallbackQuery, state: FSMContext):
             await asyncio.to_thread(lambda: trash_dir.mkdir(exist_ok=True))
             trash_dest = trash_dir / f"{int(time.time())}_{target.name}"
             await asyncio.to_thread(lambda: shutil.move(str(target), str(trash_dest)))
-            await callback.message.edit_text(
-                f"<b>Moved to Trash</b>\n<code>/{data['delete_path']}</code>",
-                parse_mode="HTML"
-            )
+            await callback.message.edit_text("✅ Deleted", parse_mode="HTML")
             logger.info(f"User {callback.from_user.id} moved folder to trash: {target} → {trash_dest}")
         else:
-            await callback.answer("❌ Folder not found.", show_alert=True)
+            await callback.answer("❌ Folder not found", show_alert=True)
     except OSError as e:
         logger.error(f"Error moving folder to trash: {e}", exc_info=True)
-        await callback.message.edit_text(f"❌ Failed: {type(e).__name__}", parse_mode="HTML")
+        await callback.message.edit_text(f"❌ {type(e).__name__}", parse_mode="HTML")
 
     await state.clear()
     await callback.answer()
@@ -340,5 +321,5 @@ async def execute_delete(callback: types.CallbackQuery, state: FSMContext):
 async def cancel_folder_op(callback: types.CallbackQuery, state: FSMContext):
     """Cancel folder manager operation."""
     await state.clear()
-    await callback.message.edit_text("Cancelled.", parse_mode="HTML")
+    await callback.message.edit_text("Closed.", parse_mode="HTML")
     await callback.answer()

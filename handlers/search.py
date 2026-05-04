@@ -34,7 +34,7 @@ def get_category_keyboard():
 @router.callback_query(F.data == "search_cancel")
 async def search_cancel(callback: types.CallbackQuery):
     """Cancel current search/browse operation."""
-    await callback.message.edit_text("Cancelled.", parse_mode="HTML")
+    await callback.message.edit_text("Closed.", parse_mode="HTML")
     await callback.answer()
 
 @router.message(Command("search"))
@@ -42,7 +42,7 @@ async def cmd_search(message: types.Message):
     """Start file browser with category selection."""
     if not is_authorized(message.from_user.id):
         return
-    await message.answer("<b>Browse</b>\nSelect a category:", parse_mode="HTML", reply_markup=get_category_keyboard())
+    await message.answer("<b>🔍 Browse</b>", parse_mode="HTML", reply_markup=get_category_keyboard())
 
 @router.message(lambda m: m.text == "🔎 Find")
 async def find_button(message: types.Message, state: FSMContext):
@@ -50,7 +50,7 @@ async def find_button(message: types.Message, state: FSMContext):
     if not is_authorized(message.from_user.id):
         return
     await state.set_state(FindState.waiting_for_query)
-    await message.answer("<b>Find</b>\n\nEnter a filename to search across the NAS:", parse_mode="HTML")
+    await message.answer("<b>🔎 Find</b>", parse_mode="HTML")
 
 @router.message(FindState.waiting_for_query)
 async def find_query_received(message: types.Message, state: FSMContext):
@@ -58,10 +58,10 @@ async def find_query_received(message: types.Message, state: FSMContext):
     await state.clear()
     query = message.text.strip() if message.text else None
     if not query:
-        await message.answer("❌ Please type a filename to search for.", parse_mode="HTML")
+        await message.answer("❌ Empty query", parse_mode="HTML")
         return
     if len(query) > 200:
-        await message.answer("❌ Search query too long (max 200 characters).", parse_mode="HTML")
+        await message.answer("❌ Query too long", parse_mode="HTML")
         return
     await _run_find(message, query)
 
@@ -72,7 +72,7 @@ async def cmd_find(message: types.Message, command: CommandObject):
         return
     query = command.args
     if not query:
-        await message.answer("🔍 <b>Usage:</b> <code>/find [filename]</code>", parse_mode="HTML")
+        await message.answer("❌ Usage: <code>/find filename</code>", parse_mode="HTML")
         return
     await _run_find(message, query)
 
@@ -96,7 +96,7 @@ async def _run_find(message: types.Message, query: str):
     found = await asyncio.to_thread(do_search)
 
     if not found:
-        await message.answer(f"No files found matching <code>{query}</code>.", parse_mode="HTML")
+        await message.answer(f"❌ No results for <code>{query}</code>", parse_mode="HTML")
         return
 
     # Evict oldest entry if cache is full (LRU-style)
@@ -111,7 +111,7 @@ async def _send_find_page(target: types.Message | types.CallbackQuery, user_id: 
     """Send paginated search results with file options."""
     cache = find_cache.get(user_id)
     if not cache:
-        txt = "❌ Search expired, please run /find again."
+        txt = "❌ Search expired"
         if isinstance(target, types.Message):
             await target.answer(txt)
         else:
@@ -145,12 +145,9 @@ async def _send_find_page(target: types.Message | types.CallbackQuery, user_id: 
         builder.row(*nav)
     builder.row(types.InlineKeyboardButton(text="❌ Close", callback_data="search_cancel"))
 
-    text = (
-        f"<b>Search</b>  <code>{query}</code>\n"
-        f"{total} result(s)  ·  Page {page+1} of {total_pages}"
-    )
+    text = f"<b>🔎 {query}</b>\n{total} result(s)  ·  Page {page+1}/{total_pages}"
     if skipped_count > 0:
-        text += f"\n⚠️ {skipped_count} file(s) with very long names not accessible"
+        text += f"\n⚠️ {skipped_count} file(s) skipped"
     if isinstance(target, types.Message):
         await target.answer(text, parse_mode="HTML", reply_markup=builder.as_markup())
     else:
@@ -176,7 +173,7 @@ async def list_files_in_category(callback: types.CallbackQuery):
     nas_root = Path(NAS_ROOT_PATH)
     path = safe_resolve(nas_root, rel_path)
     if path is None or not path.exists():
-        await callback.answer("❌ Folder not found.", show_alert=True)
+        await callback.answer("❌ Folder not found", show_alert=True)
         return
 
     def get_contents():
@@ -220,13 +217,12 @@ async def list_files_in_category(callback: types.CallbackQuery):
         parent_rel = "/".join(parts[:-1])
         builder.row(types.InlineKeyboardButton(text="⬅️ Up", callback_data=f"list:{parent_rel}:0"))
     else:
-        builder.row(types.InlineKeyboardButton(text="⬅️ Categories", callback_data="back_to_categories"))
-    builder.row(types.InlineKeyboardButton(text="❌ Cancel", callback_data="search_cancel"))
+        builder.row(types.InlineKeyboardButton(text="⬅️ Back", callback_data="back_to_categories"))
+    builder.row(types.InlineKeyboardButton(text="❌ Close", callback_data="search_cancel"))
 
-    display_path = rel_path.replace("/", " / ")
+    display_path = rel_path if rel_path else "/"
     await callback.message.edit_text(
-        f"<b>{display_path}</b>\n"
-        f"{len(subdirs)} folder(s)  ·  {len(all_files)} file(s)  ·  Page {page+1}/{total_pages}",
+        f"<b>📁 {display_path}</b>\n{total} item(s)  ·  Page {page+1}/{total_pages}",
         parse_mode="HTML", reply_markup=builder.as_markup()
     )
     await callback.answer()
@@ -234,7 +230,7 @@ async def list_files_in_category(callback: types.CallbackQuery):
 @router.callback_query(F.data == "back_to_categories")
 async def back_to_categories(callback: types.CallbackQuery):
     """Return to category selection."""
-    await callback.message.edit_text("<b>Browse</b>\nSelect a category:", parse_mode="HTML", reply_markup=get_category_keyboard())
+    await callback.message.edit_text("<b>🔍 Browse</b>", parse_mode="HTML", reply_markup=get_category_keyboard())
     await callback.answer()
 
 @router.callback_query(F.data.startswith("file_opts:"))
@@ -245,15 +241,13 @@ async def show_file_options(callback: types.CallbackQuery):
     nas_root = Path(NAS_ROOT_PATH)
     file_path = safe_resolve(nas_root, rel_dir)
     if file_path is None:
-        await callback.answer("❌ Invalid path.", show_alert=True)
+        await callback.answer("❌ Invalid path", show_alert=True)
         return
     file_path = file_path / file_name
 
-    size_str = mtime_str = "N/A"
+    size_str = "?"
     if file_path.exists():
-        stat = file_path.stat()
-        size_str = format_bytes(stat.st_size)
-        mtime_str = datetime.fromtimestamp(stat.st_mtime).strftime("%Y-%m-%d %H:%M")
+        size_str = format_bytes(file_path.stat().st_size)
 
     top_cat = rel_dir.split("/")[0]
     builder = InlineKeyboardBuilder()
@@ -261,16 +255,11 @@ async def show_file_options(callback: types.CallbackQuery):
     builder.button(text="✏️ Rename", callback_data=f"rename_ask:{rel_dir}:{file_name}")
     builder.button(text="🗑️ Delete", callback_data=f"del_conf:{rel_dir}:{file_name}")
     builder.button(text="⬅️ Back", callback_data=f"list:{top_cat}:0")
-    builder.button(text="❌ Cancel", callback_data="search_cancel")
+    builder.button(text="❌ Close", callback_data="search_cancel")
     builder.adjust(2)
 
     await callback.message.edit_text(
-        f"<b>{file_name}</b>\n\n"
-        f"<pre>"
-        f"Path      /{rel_dir}/\n"
-        f"Size      {size_str}\n"
-        f"Modified  {mtime_str}"
-        f"</pre>",
+        f"<b>📄 {file_name}</b>\n{size_str}",
         parse_mode="HTML", reply_markup=builder.as_markup()
     )
     await callback.answer()
@@ -283,21 +272,21 @@ async def send_file_to_user(callback: types.CallbackQuery, bot: Bot):
     nas_root = Path(NAS_ROOT_PATH)
     base = safe_resolve(nas_root, rel_dir)
     if base is None:
-        await callback.answer("❌ Invalid path.", show_alert=True)
+        await callback.answer("❌ Invalid path", show_alert=True)
         return
     file_path = base / file_name
 
     if not file_path.exists():
-        await callback.answer("❌ File no longer exists.", show_alert=True)
+        await callback.answer("❌ File not found", show_alert=True)
         return
 
-    await callback.message.edit_text(f"Sending <code>{file_name}</code>...", parse_mode="HTML")
+    await callback.message.edit_text("📥 Sending...", parse_mode="HTML")
     try:
         await bot.send_document(callback.from_user.id, types.FSInputFile(str(file_path)))
-        await callback.message.edit_text(f"✅ <b>Sent</b>\n<code>{file_name}</code>", parse_mode="HTML")
+        await callback.message.edit_text("✅ Sent", parse_mode="HTML")
     except Exception as e:
         logger.error(f"Error sending file: {e}")
-        await callback.message.edit_text("❌ Failed to send file.", parse_mode="HTML")
+        await callback.message.edit_text("❌ Send failed", parse_mode="HTML")
     await callback.answer()
 
 @router.callback_query(F.data.startswith("del_conf:"))
@@ -305,14 +294,12 @@ async def delete_confirmation(callback: types.CallbackQuery):
     """Show delete confirmation for a file."""
     _, rel_dir, file_name = callback.data.split(":", 2)
     builder = InlineKeyboardBuilder()
-    builder.button(text="🔥 Yes, Move to Trash", callback_data=f"del_exec:{rel_dir}:{file_name}")
+    builder.button(text="🗑️ Delete", callback_data=f"del_exec:{rel_dir}:{file_name}")
     builder.button(text="❌ Cancel", callback_data=f"file_opts:{rel_dir}:{file_name}")
     builder.adjust(2)
 
     await callback.message.edit_text(
-        f"⚠️ <b>Move to Trash?</b>\n\n"
-        f"<code>{file_name}</code>\n\n"
-        f"This file will be moved to <code>.trash/</code> and can be recovered manually.",
+        f"⚠️ <b>Delete?</b>\n<code>{file_name}</code>",
         parse_mode="HTML", reply_markup=builder.as_markup()
     )
     await callback.answer()
@@ -323,13 +310,13 @@ async def delete_file_execution(callback: types.CallbackQuery):
     _, rel_dir, file_name = callback.data.split(":", 2)
 
     if is_rate_limited(callback.from_user.id):
-        await callback.answer("⏳ Too fast, wait a moment.", show_alert=True)
+        await callback.answer("⏳ Too fast", show_alert=True)
         return
 
     nas_root = Path(NAS_ROOT_PATH)
     base = safe_resolve(nas_root, rel_dir)
     if base is None:
-        await callback.answer("❌ Invalid path.", show_alert=True)
+        await callback.answer("❌ Invalid path", show_alert=True)
         return
     file_path = base / file_name
 
@@ -340,13 +327,13 @@ async def delete_file_execution(callback: types.CallbackQuery):
             await asyncio.to_thread(lambda: trash_dir.mkdir(exist_ok=True))
             trash_dest = trash_dir / f"{int(time.time())}_{file_name}"
             await asyncio.to_thread(lambda: file_path.rename(trash_dest))
-            await callback.message.edit_text(f"<b>Moved to Trash</b>\n<code>{file_name}</code>", parse_mode="HTML")
+            await callback.message.edit_text("✅ Deleted", parse_mode="HTML")
             logger.info(f"User {callback.from_user.id} moved to trash: {file_path}")
         else:
-            await callback.answer("❌ File not found (may have been deleted).", show_alert=True)
+            await callback.answer("❌ File not found", show_alert=True)
     except OSError as e:
         logger.error(f"Error moving file to trash: {e}", exc_info=True)
-        await callback.answer(f"❌ Error: {type(e).__name__}", show_alert=True)
+        await callback.answer(f"❌ {type(e).__name__}", show_alert=True)
     await callback.answer()
 
 @router.callback_query(F.data == "check_space_quick")
