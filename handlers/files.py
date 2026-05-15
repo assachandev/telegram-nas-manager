@@ -7,14 +7,20 @@ from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 from config import NAS_ROOT_PATH, CATEGORIES, is_authorized
-from utils.storage import format_bytes, sanitize_filename, get_unique_path, is_rate_limited, safe_resolve, validate_folder_name
+from utils.storage import (
+    format_bytes, sanitize_filename, get_unique_path, is_rate_limited,
+    safe_resolve, validate_folder_name,
+    cache_set, cache_get_fresh, cache_prune_expired,
+)
 
 logger = logging.getLogger(__name__)
 router = Router()
 
-# In-memory session for pending file operations (max 500 concurrent sessions)
+# In-memory session for pending file uploads. Each session has its own UUID.
+# Bound both ways: max 500 entries, plus a 1-hour TTL so stale sessions go away.
 pending_files: dict = {}
 _MAX_PENDING = 500
+_PENDING_TTL = 3600  # seconds
 
 class RenameState(StatesGroup):
     waiting_for_name = State()
@@ -92,17 +98,15 @@ async def handle_file_upload(message: types.Message):
             recommended_cat = cat
             break
 
-    if len(pending_files) >= _MAX_PENDING:
-        oldest_key = next(iter(pending_files))
-        pending_files.pop(oldest_key, None)
-
+    # Drop any session that hasn't been touched in an hour, then store.
+    cache_prune_expired(pending_files, _PENDING_TTL)
     session_id = uuid.uuid4().hex[:16]
-    pending_files[session_id] = {
+    cache_set(pending_files, session_id, {
         "name": clean_name,
         "size": file_size,
         "file_id": file_id,
         "recommended": recommended_cat
-    }
+    }, _MAX_PENDING)
 
     keyboard = await get_folder_selection_keyboard(session_id, "", recommended_cat)
     await message.answer(
@@ -118,7 +122,8 @@ async def handle_file_upload(message: types.Message):
 async def browse_folders_for_save(callback: types.CallbackQuery):
     _, session_id, rel_path = callback.data.split(":", 2)
 
-    if session_id not in pending_files:
+    data = cache_get_fresh(pending_files, session_id, _PENDING_TTL)
+    if data is None:
         await callback.answer("❌ Session expired.", show_alert=True)
         return
 
@@ -127,7 +132,6 @@ async def browse_folders_for_save(callback: types.CallbackQuery):
         await callback.answer("❌ Invalid path.", show_alert=True)
         return
 
-    data = pending_files[session_id]
     display_path = rel_path if rel_path else "/"
 
     keyboard = await get_folder_selection_keyboard(session_id, rel_path)
@@ -145,7 +149,7 @@ async def browse_folders_for_save(callback: types.CallbackQuery):
 async def save_to_selected_path(callback: types.CallbackQuery, bot: Bot):
     _, session_id, rel_path = callback.data.split(":", 2)
 
-    if session_id not in pending_files:
+    if cache_get_fresh(pending_files, session_id, _PENDING_TTL) is None:
         await callback.answer("❌ Session expired.", show_alert=True)
         return
 
@@ -159,7 +163,8 @@ async def save_to_selected_path(callback: types.CallbackQuery, bot: Bot):
         await callback.answer("❌ Invalid path.", show_alert=True)
         return
 
-    data = pending_files.pop(session_id, None)
+    raw = pending_files.pop(session_id, None)
+    data = raw.get("value") if raw else None
     if data is None:
         await callback.answer("❌ Session expired.", show_alert=True)
         return

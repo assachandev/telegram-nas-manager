@@ -64,6 +64,38 @@ def get_unique_path(target_path: Path) -> Path:
 
 _rate_data: OrderedDict[int, float] = OrderedDict()
 
+def cache_set(cache: dict, key, value, max_size: int) -> None:
+    """Insert into a session cache with creation timestamp; evict the
+    oldest entry if `cache` is at `max_size`. Used together with
+    cache_get_fresh() / cache_prune_expired() to bound both size and age."""
+    if len(cache) >= max_size:
+        oldest_key = next(iter(cache))
+        cache.pop(oldest_key, None)
+    cache[key] = {"value": value, "ts": time.time()}
+
+
+def cache_get_fresh(cache: dict, key, ttl_seconds: float):
+    """Return the value stored under `key` if it exists and is younger
+    than ttl_seconds, else None. Stale entries are dropped on access."""
+    entry = cache.get(key)
+    if not entry:
+        return None
+    if time.time() - entry.get("ts", 0) > ttl_seconds:
+        cache.pop(key, None)
+        return None
+    return entry.get("value")
+
+
+def cache_prune_expired(cache: dict, ttl_seconds: float) -> int:
+    """Drop every entry older than ttl_seconds. Returns how many were
+    removed. Cheap enough to call on every cache write."""
+    now = time.time()
+    expired = [k for k, v in cache.items() if now - v.get("ts", 0) > ttl_seconds]
+    for k in expired:
+        cache.pop(k, None)
+    return len(expired)
+
+
 def is_rate_limited(user_id: int, min_interval: float = 2.0) -> bool:
     """Check and update rate limiter for destructive operations. Prevents spam."""
     now = time.time()

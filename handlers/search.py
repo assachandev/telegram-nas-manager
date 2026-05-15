@@ -8,7 +8,10 @@ from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 from config import NAS_ROOT_PATH, CATEGORIES, PAGE_SIZE, PROGRESS_BAR_LENGTH, is_authorized
-from utils.storage import format_bytes, is_rate_limited, get_disk_usage, generate_progress_bar, safe_resolve
+from utils.storage import (
+    format_bytes, is_rate_limited, get_disk_usage, generate_progress_bar, safe_resolve,
+    cache_set, cache_get_fresh, cache_prune_expired,
+)
 
 logger = logging.getLogger(__name__)
 router = Router()
@@ -17,10 +20,11 @@ class FindState(StatesGroup):
     waiting_for_query = State()
 
 # Cache for /find pagination: user_id -> {"query": str, "results": list}
-# Limited to _MAX_FIND_CACHE entries to prevent unbounded memory growth
+# Bound by both count (_MAX_FIND_CACHE) and age (_FIND_CACHE_TTL).
 find_cache: dict = {}
 FIND_PAGE_SIZE = 10
 _MAX_FIND_CACHE = 200
+_FIND_CACHE_TTL = 1800   # 30 minutes
 
 def get_category_keyboard():
     """Build category selector keyboard for browsing files."""
@@ -100,16 +104,14 @@ async def _run_find(message: types.Message, query: str):
         return
 
     # Evict oldest entry if cache is full (LRU-style)
-    if len(find_cache) >= _MAX_FIND_CACHE:
-        oldest_key = next(iter(find_cache))
-        find_cache.pop(oldest_key, None)
-
-    find_cache[message.from_user.id] = {"query": query, "results": found}
+    cache_prune_expired(find_cache, _FIND_CACHE_TTL)
+    cache_set(find_cache, message.from_user.id,
+              {"query": query, "results": found}, _MAX_FIND_CACHE)
     await _send_find_page(message, message.from_user.id, 0)
 
 async def _send_find_page(target: types.Message | types.CallbackQuery, user_id: int, page: int):
     """Send paginated search results with file options."""
-    cache = find_cache.get(user_id)
+    cache = cache_get_fresh(find_cache, user_id, _FIND_CACHE_TTL)
     if not cache:
         txt = "❌ Search expired"
         if isinstance(target, types.Message):

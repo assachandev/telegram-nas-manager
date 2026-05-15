@@ -5,14 +5,20 @@ from pathlib import Path
 from aiogram import Router, types, F
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 from config import NAS_ROOT_PATH, is_authorized
-from utils.storage import format_bytes, is_rate_limited, list_trash_items, empty_trash, get_unique_path
+from utils.storage import (
+    format_bytes, is_rate_limited, list_trash_items, empty_trash, get_unique_path,
+    cache_set, cache_get_fresh, cache_prune_expired,
+)
 
 logger = logging.getLogger(__name__)
 router = Router()
 
 TRASH_PAGE_SIZE = 10
+_TRASH_CACHE_TTL = 1800   # 30 minutes
+_MAX_TRASH_CACHE = 200
 
-# Cache: user_id -> list of item names (for index-based callback data)
+# Cache: user_id -> list of item names (for index-based callback data).
+# Bound by both count and age.
 _trash_cache: dict = {}
 
 def _get_nas_root() -> Path:
@@ -38,8 +44,10 @@ async def _show_trash(target, user_id: int, page: int):
     items = await asyncio.to_thread(list_trash_items, nas_root)
     total = len(items)
 
-    # ALWAYS regenerate cache for this page to prevent stale index problems
-    _trash_cache[user_id] = [item.name for item in items]
+    # ALWAYS regenerate cache for this page to prevent stale index problems.
+    cache_prune_expired(_trash_cache, _TRASH_CACHE_TTL)
+    cache_set(_trash_cache, user_id,
+              [item.name for item in items], _MAX_TRASH_CACHE)
 
     if total == 0:
         text = "<b>🗑 Trash</b>\nEmpty"
@@ -100,7 +108,7 @@ async def trash_item_options(callback: types.CallbackQuery):
     idx = int(callback.data.split(":", 1)[1])
     user_id = callback.from_user.id
 
-    cache = _trash_cache.get(user_id, [])
+    cache = cache_get_fresh(_trash_cache, user_id, _TRASH_CACHE_TTL) or []
     if idx >= len(cache):
         await callback.answer("❌ Item not found. Please refresh trash.", show_alert=True)
         return
@@ -146,7 +154,7 @@ async def trash_restore(callback: types.CallbackQuery):
         await callback.answer("⏳ Too fast, wait a moment.", show_alert=True)
         return
 
-    cache = _trash_cache.get(user_id, [])
+    cache = cache_get_fresh(_trash_cache, user_id, _TRASH_CACHE_TTL) or []
     if idx >= len(cache):
         await callback.answer("❌ Item not found. Please refresh trash.", show_alert=True)
         return
@@ -187,7 +195,7 @@ async def trash_delete_permanent(callback: types.CallbackQuery):
         await callback.answer("⏳ Too fast, wait a moment.", show_alert=True)
         return
 
-    cache = _trash_cache.get(user_id, [])
+    cache = cache_get_fresh(_trash_cache, user_id, _TRASH_CACHE_TTL) or []
     if idx >= len(cache):
         await callback.answer("❌ Item not found. Please refresh trash.", show_alert=True)
         return
