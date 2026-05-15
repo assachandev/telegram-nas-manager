@@ -10,7 +10,7 @@ from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 from config import NAS_ROOT_PATH, is_authorized
-from utils.storage import safe_resolve, validate_folder_name
+from utils.storage import safe_resolve, validate_folder_name, is_rate_limited
 
 logger = logging.getLogger(__name__)
 router = Router()
@@ -168,7 +168,10 @@ async def process_new_name(message: types.Message, state: FSMContext):
 
 @router.callback_query(FolderManager.confirm_create, F.data == "fdir_confirm_create")
 async def execute_create(callback: types.CallbackQuery, state: FSMContext):
-    """Execute folder creation (destructive operation, no rate limit - should add one)."""
+    """Execute folder creation."""
+    if is_rate_limited(callback.from_user.id):
+        await callback.answer("⏳ Slow down a bit.", show_alert=False)
+        return
     data = await state.get_data()
 
     nas_root = Path(NAS_ROOT_PATH)
@@ -232,7 +235,10 @@ async def process_rename_name(message: types.Message, state: FSMContext):
 
 @router.callback_query(FolderManager.confirm_rename, F.data == "fdir_confirm_rename")
 async def execute_rename(callback: types.CallbackQuery, state: FSMContext):
-    """Execute folder rename (destructive operation, no rate limit - should add one)."""
+    """Execute folder rename."""
+    if is_rate_limited(callback.from_user.id):
+        await callback.answer("⏳ Slow down a bit.", show_alert=False)
+        return
     data = await state.get_data()
 
     nas_root = Path(NAS_ROOT_PATH)
@@ -287,7 +293,10 @@ async def confirm_folder_delete(callback: types.CallbackQuery, state: FSMContext
 
 @router.callback_query(FolderManager.confirm_delete, F.data == "fdir_confirm_delete_exec")
 async def execute_delete(callback: types.CallbackQuery, state: FSMContext):
-    """Execute folder deletion to trash (destructive operation, no rate limit - should add one)."""
+    """Execute folder deletion to trash."""
+    if is_rate_limited(callback.from_user.id):
+        await callback.answer("⏳ Slow down a bit.", show_alert=False)
+        return
     data = await state.get_data()
 
     nas_root = Path(NAS_ROOT_PATH)
