@@ -37,7 +37,7 @@ async def get_folder_selection_keyboard(session_id: str, current_path_str: str, 
 
     if current_path_str == "" and recommended_cat:
         builder.button(
-            text=f"⭐ Save to {recommended_cat} (Auto)",
+            text=f"⭐  Auto-sort to {recommended_cat}",
             callback_data=f"save_to:{session_id}:{recommended_cat}"
         )
 
@@ -55,13 +55,13 @@ async def get_folder_selection_keyboard(session_id: str, current_path_str: str, 
     builder.adjust(2)
 
     action_builder = InlineKeyboardBuilder()
-    action_builder.button(text="✅ Save Here", callback_data=f"save_to:{session_id}:{current_path_str}")
+    action_builder.button(text="✅  Save here", callback_data=f"save_to:{session_id}:{current_path_str}")
 
     if current_path_str != "":
         parent_path = "/".join(current_path_str.split("/")[:-1])
-        action_builder.button(text="⬅️ Up", callback_data=f"browse_save:{session_id}:{parent_path}")
+        action_builder.button(text="⬆️  Up one level", callback_data=f"browse_save:{session_id}:{parent_path}")
 
-    action_builder.button(text="❌ Cancel", callback_data=f"cancel_up:{session_id}")
+    action_builder.button(text="❌  Cancel", callback_data=f"cancel_up:{session_id}")
     action_builder.adjust(2)
 
     builder.attach(action_builder)
@@ -110,10 +110,11 @@ async def handle_file_upload(message: types.Message):
 
     keyboard = await get_folder_selection_keyboard(session_id, "", recommended_cat)
     await message.answer(
-        f"<b>File Received</b>\n"
-        f"<code>{clean_name}</code>  ·  {format_bytes(file_size)}\n\n"
-        f"Destination:  <code>/</code>\n"
-        f"Navigate to a folder or save here:",
+        f"<b>📥 Incoming file</b>\n"
+        f"<code>{clean_name}</code>\n"
+        f"<i>{format_bytes(file_size)}  ·  category guess: {recommended_cat}</i>\n\n"
+        f"<b>Destination:</b>  <code>/</code>\n"
+        f"<i>Pick a folder, or save here.</i>",
         parse_mode="HTML",
         reply_markup=keyboard
     )
@@ -136,10 +137,11 @@ async def browse_folders_for_save(callback: types.CallbackQuery):
 
     keyboard = await get_folder_selection_keyboard(session_id, rel_path)
     await callback.message.edit_text(
-        f"<b>File Received</b>\n"
-        f"<code>{data['name']}</code>  ·  {format_bytes(data['size'])}\n\n"
-        f"Destination:  <code>/{display_path}</code>\n"
-        f"Navigate to a folder or save here:",
+        f"<b>📥 Incoming file</b>\n"
+        f"<code>{data['name']}</code>\n"
+        f"<i>{format_bytes(data['size'])}</i>\n\n"
+        f"<b>Destination:</b>  <code>/{display_path}</code>\n"
+        f"<i>Pick a folder, or save here.</i>",
         parse_mode="HTML",
         reply_markup=keyboard
     )
@@ -172,7 +174,7 @@ async def save_to_selected_path(callback: types.CallbackQuery, bot: Bot):
     target_path = get_unique_path(target_dir / data['name'])
 
     await callback.message.edit_text(
-        f"Saving <code>{data['name']}</code>...",
+        f"⏳ <b>Saving…</b>\n<code>{data['name']}</code>\n<i>{format_bytes(data['size'])}</i>",
         parse_mode="HTML"
     )
 
@@ -182,16 +184,18 @@ async def save_to_selected_path(callback: types.CallbackQuery, bot: Bot):
         await bot.download_file(file_info.file_path, destination=str(target_path))
 
         display_rel = str(target_dir.relative_to(nas_root))
+        if display_rel == ".":
+            display_rel = ""
         await callback.message.edit_text(
-            f"✅ <b>Saved</b>\n\n"
+            f"✅ <b>Saved</b>\n"
             f"<code>{target_path.name}</code>\n"
-            f"→ <code>/{display_rel}/</code>",
+            f"<i>{format_bytes(data['size'])}  →  /{display_rel}/</i>",
             parse_mode="HTML"
         )
         logger.info(f"User {callback.from_user.id} saved file to {target_path}")
     except OSError as e:
         logger.error(f"Error saving file: {e}", exc_info=True)
-        await callback.message.edit_text("❌ Failed to save file. Please try again.", parse_mode="HTML")
+        await callback.message.edit_text("❌ <b>Save failed.</b> Please try again.", parse_mode="HTML")
     except Exception as e:
         logger.error(f"Unexpected error saving file: {e}", exc_info=True)
         await callback.message.edit_text("❌ An unexpected error occurred.", parse_mode="HTML")
@@ -202,7 +206,7 @@ async def save_to_selected_path(callback: types.CallbackQuery, bot: Bot):
 async def cancel_upload(callback: types.CallbackQuery):
     session_id = callback.data.split(":", 1)[1]
     pending_files.pop(session_id, None)
-    await callback.message.edit_text("Cancelled.", parse_mode="HTML")
+    await callback.message.edit_text("🚫 <b>Cancelled.</b> File not saved.", parse_mode="HTML")
     await callback.answer()
 
 # --- RENAME FLOW ---
@@ -213,9 +217,9 @@ async def rename_ask(callback: types.CallbackQuery, state: FSMContext):
     await state.set_state(RenameState.waiting_for_name)
     await state.update_data(rel_dir=rel_dir, file_name=file_name)
     await callback.message.edit_text(
-        f"<b>Rename</b>\n\n"
+        f"<b>✏️ Rename file</b>\n"
         f"Current:  <code>{file_name}</code>\n\n"
-        f"Type the new filename:",
+        f"<i>Send the new filename in your next message.</i>",
         parse_mode="HTML"
     )
     await callback.answer()
@@ -247,7 +251,7 @@ async def rename_execute(message: types.Message, state: FSMContext):
     try:
         await asyncio.to_thread(lambda: old_path.rename(new_path))
         await message.answer(
-            f"✅ <b>Renamed</b>\n\n"
+            f"✅ <b>Renamed</b>\n"
             f"<code>{data['file_name']}</code>\n→ <code>{new_path.name}</code>",
             parse_mode="HTML"
         )

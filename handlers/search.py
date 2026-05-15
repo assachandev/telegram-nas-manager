@@ -38,7 +38,7 @@ def get_category_keyboard():
 @router.callback_query(F.data == "search_cancel")
 async def search_cancel(callback: types.CallbackQuery):
     """Cancel current search/browse operation."""
-    await callback.message.edit_text("Closed.", parse_mode="HTML")
+    await callback.message.edit_text("🚪 <b>Closed.</b>", parse_mode="HTML")
     await callback.answer()
 
 @router.message(Command("search"))
@@ -46,7 +46,11 @@ async def cmd_search(message: types.Message):
     """Start file browser with category selection."""
     if not is_authorized(message.from_user.id):
         return
-    await message.answer("<b>🔍 Browse</b>", parse_mode="HTML", reply_markup=get_category_keyboard())
+    await message.answer(
+        "<b>🔍 Browse</b>\n<i>Pick a category to walk into:</i>",
+        parse_mode="HTML",
+        reply_markup=get_category_keyboard(),
+    )
 
 @router.message(lambda m: m.text == "🔎 Find")
 async def find_button(message: types.Message, state: FSMContext):
@@ -54,7 +58,10 @@ async def find_button(message: types.Message, state: FSMContext):
     if not is_authorized(message.from_user.id):
         return
     await state.set_state(FindState.waiting_for_query)
-    await message.answer("<b>🔎 Find</b>", parse_mode="HTML")
+    await message.answer(
+        "<b>🔎 Find</b>\n<i>Send a filename or part of it (max 200 chars).</i>",
+        parse_mode="HTML",
+    )
 
 @router.message(FindState.waiting_for_query)
 async def find_query_received(message: types.Message, state: FSMContext):
@@ -62,10 +69,10 @@ async def find_query_received(message: types.Message, state: FSMContext):
     await state.clear()
     query = message.text.strip() if message.text else None
     if not query:
-        await message.answer("❌ Empty query", parse_mode="HTML")
+        await message.answer("❌ <b>Empty query.</b> Send some text to search.", parse_mode="HTML")
         return
     if len(query) > 200:
-        await message.answer("❌ Query too long", parse_mode="HTML")
+        await message.answer("❌ <b>Query too long.</b> Keep it under 200 characters.", parse_mode="HTML")
         return
     await _run_find(message, query)
 
@@ -100,7 +107,10 @@ async def _run_find(message: types.Message, query: str):
     found = await asyncio.to_thread(do_search)
 
     if not found:
-        await message.answer(f"❌ No results for <code>{query}</code>", parse_mode="HTML")
+        await message.answer(
+            f"🤷 <b>No matches</b>\n<i>for</i>  <code>{query}</code>",
+            parse_mode="HTML",
+        )
         return
 
     # Evict oldest entry if cache is full (LRU-style)
@@ -113,11 +123,11 @@ async def _send_find_page(target: types.Message | types.CallbackQuery, user_id: 
     """Send paginated search results with file options."""
     cache = cache_get_fresh(find_cache, user_id, _FIND_CACHE_TTL)
     if not cache:
-        txt = "❌ Search expired"
+        txt = "⌛ <b>Search expired.</b> Run <code>🔎 Find</code> again."
         if isinstance(target, types.Message):
-            await target.answer(txt)
+            await target.answer(txt, parse_mode="HTML")
         else:
-            await target.message.edit_text(txt)
+            await target.message.edit_text(txt, parse_mode="HTML")
         return
 
     results = cache["results"]
@@ -147,9 +157,10 @@ async def _send_find_page(target: types.Message | types.CallbackQuery, user_id: 
         builder.row(*nav)
     builder.row(types.InlineKeyboardButton(text="❌ Close", callback_data="search_cancel"))
 
-    text = f"<b>🔎 {query}</b>\n{total} result(s)  ·  Page {page+1}/{total_pages}"
+    text = (f"<b>🔎 Find</b>  <code>{query}</code>\n"
+            f"<i>{total} match{'es' if total != 1 else ''}  ·  page {page+1}/{total_pages}</i>")
     if skipped_count > 0:
-        text += f"\n⚠️ {skipped_count} file(s) skipped"
+        text += f"\n<i>⚠️ {skipped_count} skipped (filename too long for buttons)</i>"
     if isinstance(target, types.Message):
         await target.answer(text, parse_mode="HTML", reply_markup=builder.as_markup())
     else:
@@ -223,8 +234,13 @@ async def list_files_in_category(callback: types.CallbackQuery):
     builder.row(types.InlineKeyboardButton(text="❌ Close", callback_data="search_cancel"))
 
     display_path = rel_path if rel_path else "/"
+    n_dirs = len(subdirs)
+    n_files = len(all_files)
     await callback.message.edit_text(
-        f"<b>📁 {display_path}</b>\n{total} item(s)  ·  Page {page+1}/{total_pages}",
+        f"<b>📁 /{display_path}</b>\n"
+        f"<i>{n_dirs} folder{'s' if n_dirs != 1 else ''}  ·  "
+        f"{n_files} file{'s' if n_files != 1 else ''}  ·  "
+        f"page {page+1}/{total_pages}</i>",
         parse_mode="HTML", reply_markup=builder.as_markup()
     )
     await callback.answer()
@@ -232,7 +248,10 @@ async def list_files_in_category(callback: types.CallbackQuery):
 @router.callback_query(F.data == "back_to_categories")
 async def back_to_categories(callback: types.CallbackQuery):
     """Return to category selection."""
-    await callback.message.edit_text("<b>🔍 Browse</b>", parse_mode="HTML", reply_markup=get_category_keyboard())
+    await callback.message.edit_text(
+        "<b>🔍 Browse</b>\n<i>Pick a category to walk into:</i>",
+        parse_mode="HTML", reply_markup=get_category_keyboard(),
+    )
     await callback.answer()
 
 @router.callback_query(F.data.startswith("file_opts:"))
@@ -253,15 +272,16 @@ async def show_file_options(callback: types.CallbackQuery):
 
     top_cat = rel_dir.split("/")[0]
     builder = InlineKeyboardBuilder()
-    builder.button(text="📥 Download", callback_data=f"download:{rel_dir}:{file_name}")
-    builder.button(text="✏️ Rename", callback_data=f"rename_ask:{rel_dir}:{file_name}")
-    builder.button(text="🗑️ Delete", callback_data=f"del_conf:{rel_dir}:{file_name}")
-    builder.button(text="⬅️ Back", callback_data=f"list:{top_cat}:0")
-    builder.button(text="❌ Close", callback_data="search_cancel")
+    builder.button(text="📥  Download",  callback_data=f"download:{rel_dir}:{file_name}")
+    builder.button(text="✏️  Rename",     callback_data=f"rename_ask:{rel_dir}:{file_name}")
+    builder.button(text="🗑️  Delete",     callback_data=f"del_conf:{rel_dir}:{file_name}")
+    builder.button(text="⬅️  Back",       callback_data=f"list:{top_cat}:0")
+    builder.button(text="❌  Close",      callback_data="search_cancel")
     builder.adjust(2)
 
     await callback.message.edit_text(
-        f"<b>📄 {file_name}</b>\n{size_str}",
+        f"<b>📄 {file_name}</b>\n"
+        f"<i>{size_str}  ·  /{rel_dir}/</i>",
         parse_mode="HTML", reply_markup=builder.as_markup()
     )
     await callback.answer()
@@ -282,13 +302,19 @@ async def send_file_to_user(callback: types.CallbackQuery, bot: Bot):
         await callback.answer("❌ File not found", show_alert=True)
         return
 
-    await callback.message.edit_text("📥 Sending...", parse_mode="HTML")
+    await callback.message.edit_text(
+        f"📤 <b>Sending…</b>\n<code>{file_name}</code>",
+        parse_mode="HTML",
+    )
     try:
         await bot.send_document(callback.from_user.id, types.FSInputFile(str(file_path)))
-        await callback.message.edit_text("✅ Sent", parse_mode="HTML")
+        await callback.message.edit_text(
+            f"✅ <b>Sent</b>\n<code>{file_name}</code>",
+            parse_mode="HTML",
+        )
     except Exception as e:
         logger.error(f"Error sending file: {e}")
-        await callback.message.edit_text("❌ Send failed", parse_mode="HTML")
+        await callback.message.edit_text("❌ <b>Send failed.</b> Try again.", parse_mode="HTML")
     await callback.answer()
 
 @router.callback_query(F.data.startswith("del_conf:"))
@@ -296,12 +322,14 @@ async def delete_confirmation(callback: types.CallbackQuery):
     """Show delete confirmation for a file."""
     _, rel_dir, file_name = callback.data.split(":", 2)
     builder = InlineKeyboardBuilder()
-    builder.button(text="🗑️ Delete", callback_data=f"del_exec:{rel_dir}:{file_name}")
-    builder.button(text="❌ Cancel", callback_data=f"file_opts:{rel_dir}:{file_name}")
-    builder.adjust(2)
+    builder.button(text="🗑️  Move to trash",  callback_data=f"del_exec:{rel_dir}:{file_name}")
+    builder.button(text="❌  Keep it",         callback_data=f"file_opts:{rel_dir}:{file_name}")
+    builder.adjust(1)
 
     await callback.message.edit_text(
-        f"⚠️ <b>Delete?</b>\n<code>{file_name}</code>",
+        f"⚠️ <b>Move to trash?</b>\n"
+        f"<code>{file_name}</code>\n"
+        f"<i>You can restore from 🗑 Trash later.</i>",
         parse_mode="HTML", reply_markup=builder.as_markup()
     )
     await callback.answer()
@@ -329,7 +357,10 @@ async def delete_file_execution(callback: types.CallbackQuery):
             await asyncio.to_thread(lambda: trash_dir.mkdir(exist_ok=True))
             trash_dest = trash_dir / f"{int(time.time())}_{file_name}"
             await asyncio.to_thread(lambda: file_path.rename(trash_dest))
-            await callback.message.edit_text("✅ Deleted", parse_mode="HTML")
+            await callback.message.edit_text(
+                f"🗑️ <b>Moved to trash</b>\n<code>{file_name}</code>",
+                parse_mode="HTML",
+            )
             logger.info(f"User {callback.from_user.id} moved to trash: {file_path}")
         else:
             await callback.answer("❌ File not found", show_alert=True)
