@@ -160,7 +160,8 @@ async def _send_find_page(target: types.Message | types.CallbackQuery, user_id: 
     text = (f"<b>🔎 Find</b>  <code>{query}</code>\n"
             f"<i>{total} match{'es' if total != 1 else ''}  ·  page {page+1}/{total_pages}</i>")
     if skipped_count > 0:
-        text += f"\n<i>⚠️ {skipped_count} skipped (filename too long for buttons)</i>"
+        text += (f"\n<i>⚠️ {skipped_count} hidden on this page — "
+                 f"filename too long for a button.</i>")
     if isinstance(target, types.Message):
         await target.answer(text, parse_mode="HTML", reply_markup=builder.as_markup())
     else:
@@ -204,17 +205,24 @@ async def list_files_in_category(callback: types.CallbackQuery):
     page = max(0, min(page, total_pages - 1))
 
     builder = InlineKeyboardBuilder()
+    skipped_count = 0
     for kind, item in entries[page * PAGE_SIZE:(page + 1) * PAGE_SIZE]:
         if kind == "dir":
             sub_rel = f"{rel_path}/{item.name}"
             cb = f"list:{sub_rel}:0"
             if len(cb.encode()) <= 64:
                 builder.button(text=f"📁 {item.name}/", callback_data=cb)
+            else:
+                skipped_count += 1
+                logger.warning(f"Skipped folder (name too long for callback): {item.name}")
         else:
             size_str = format_bytes(item.stat().st_size)
             cb = f"file_opts:{rel_path}:{item.name}"
             if len(cb.encode()) <= 64:
                 builder.button(text=f"📄 {item.name}  [{size_str}]", callback_data=cb)
+            else:
+                skipped_count += 1
+                logger.warning(f"Skipped file (name too long for callback): {item.name}")
     builder.adjust(1)
 
     nav = []
@@ -236,12 +244,15 @@ async def list_files_in_category(callback: types.CallbackQuery):
     display_path = rel_path if rel_path else "/"
     n_dirs = len(subdirs)
     n_files = len(all_files)
+    text = (f"<b>📁 /{display_path}</b>\n"
+            f"<i>{n_dirs} folder{'s' if n_dirs != 1 else ''}  ·  "
+            f"{n_files} file{'s' if n_files != 1 else ''}  ·  "
+            f"page {page+1}/{total_pages}</i>")
+    if skipped_count > 0:
+        text += (f"\n<i>⚠️ {skipped_count} hidden on this page — "
+                 f"filename too long for a button.</i>")
     await callback.message.edit_text(
-        f"<b>📁 /{display_path}</b>\n"
-        f"<i>{n_dirs} folder{'s' if n_dirs != 1 else ''}  ·  "
-        f"{n_files} file{'s' if n_files != 1 else ''}  ·  "
-        f"page {page+1}/{total_pages}</i>",
-        parse_mode="HTML", reply_markup=builder.as_markup()
+        text, parse_mode="HTML", reply_markup=builder.as_markup()
     )
     await callback.answer()
 
