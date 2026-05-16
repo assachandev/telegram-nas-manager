@@ -226,6 +226,9 @@ async def rename_ask(callback: types.CallbackQuery, state: FSMContext):
 
 @router.message(RenameState.waiting_for_name)
 async def rename_execute(message: types.Message, state: FSMContext):
+    if is_rate_limited(message.from_user.id):
+        await message.answer("⏳ <b>Slow down a bit.</b> Try again in a moment.", parse_mode="HTML")
+        return
     new_name = message.text.strip() if message.text else ""
     error = validate_folder_name(new_name)
     if error:
