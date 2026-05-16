@@ -95,6 +95,8 @@ cp .env.example .env
 | `BOT_TOKEN` | From [@BotFather](https://t.me/BotFather) |
 | `TELEGRAM_CHAT_ID` | Your Telegram user ID — get from [@userinfobot](https://t.me/userinfobot) |
 | `HOST_DATA_DIR` | Absolute path to your NAS directory on the host |
+| `RATE_LIMIT_INTERVAL` | Seconds between destructive operations per user (default 2.0) |
+| `MAX_FILE_SIZE_MB` | Upload size ceiling (default 500) |
 
 ### 3. Run
 
@@ -146,7 +148,39 @@ Files and folders are moved to `.trash/` with a Unix timestamp prefix — never 
 └── 1711900050_old-project/
 ```
 
-From the **Trash** menu you can restore items to `/Restored/` or delete them permanently. Empty Trash wipes all items at once.
+From the **Trash** menu you can:
+- **Restore** an item — it lands in `/Restored/` at the root of your NAS, not the original location. If a name collision happens it gets a `(1)`, `(2)` suffix.
+- **Delete forever** — gone, no further recovery.
+- **Empty Trash** — nukes everything in `.trash/` at once.
+
+---
+
+## Operations
+
+### Updating
+
+```bash
+git pull
+bash setup.sh         # rebuilds the image and restarts the container
+```
+
+The bot's only state on the host is the NAS directory itself; in-memory caches (active search results, pending uploads) reset on restart. Anyone mid-flow needs to start over.
+
+### Backups
+
+The bot writes everything to `HOST_DATA_DIR`. Back that path up with whatever you use for the rest of your NAS — rsync, restic, ZFS snapshots, Synology backup, etc. There's no separate database to dump.
+
+### Logs
+
+```bash
+docker compose logs -f
+```
+
+Every destructive action (rename, delete, move-to-trash, restore, empty-trash, folder create/rename/delete) is logged with the user ID and target path, so there's an audit trail.
+
+### Authorization
+
+The bot is single-user — only the Telegram ID set in `TELEGRAM_CHAT_ID` can reach any handler. An [auth middleware](utils/middleware.py) drops every other update before it gets routed, so neither commands nor lingering callback buttons work for outsiders.
 
 ---
 
