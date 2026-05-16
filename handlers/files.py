@@ -6,7 +6,7 @@ from aiogram import Router, types, F, Bot
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.utils.keyboard import InlineKeyboardBuilder
-from config import NAS_ROOT_PATH, CATEGORIES, is_authorized
+from config import NAS_ROOT_PATH, CATEGORIES, MAX_FILE_SIZE_MB, is_authorized
 from utils.storage import (
     format_bytes, sanitize_filename, get_unique_path, is_rate_limited,
     safe_resolve, validate_folder_name,
@@ -87,6 +87,19 @@ async def handle_file_upload(message: types.Message):
         orig_name = message.audio.file_name or f"audio_{file_id[:8]}.mp3"
         file_size = message.audio.file_size
     else:
+        return
+
+    # Enforce the configured upload ceiling. Telegram itself caps bot
+    # downloads at ~20 MB unless using a local Bot API, but the limit
+    # here protects against filling /data with one giant payload.
+    max_bytes = MAX_FILE_SIZE_MB * 1024 * 1024
+    if file_size and file_size > max_bytes:
+        await message.answer(
+            f"❌ <b>File too large</b>\n"
+            f"<i>{format_bytes(file_size)} exceeds the {MAX_FILE_SIZE_MB} MB limit.</i>\n"
+            f"<i>Raise <code>MAX_FILE_SIZE_MB</code> in .env if you really need this size.</i>",
+            parse_mode="HTML",
+        )
         return
 
     clean_name = sanitize_filename(orig_name)
