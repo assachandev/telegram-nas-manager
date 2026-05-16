@@ -9,6 +9,7 @@ from aiogram.fsm.storage.memory import MemoryStorage
 from config import BOT_TOKEN, NAS_ROOT_PATH, CATEGORIES
 from handlers import commands, files, search, folders, trash
 from utils.storage import ensure_nas_structure
+from utils.middleware import AuthMiddleware
 
 logging.basicConfig(
     level=logging.INFO,
@@ -38,6 +39,14 @@ async def main():
 
     bot = Bot(token=BOT_TOKEN)
     dp = Dispatcher(storage=MemoryStorage())
+
+    # Reject every update from non-authorized users before it reaches any
+    # router. Defense in depth on top of the per-handler is_authorized
+    # checks already present in commands.py / files.py.
+    auth = AuthMiddleware()
+    dp.message.middleware(auth)
+    dp.callback_query.middleware(auth)
+    dp.edited_message.middleware(auth)
 
     dp.include_router(commands.router)
     dp.include_router(files.router)
